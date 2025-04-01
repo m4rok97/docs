@@ -23,6 +23,7 @@ IgnisHPC
    :maxdepth: 2
 
    started
+   new_started
    api
    images
    properties
