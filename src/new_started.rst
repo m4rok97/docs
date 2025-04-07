@@ -56,105 +56,13 @@ The first repository is essential for the construction of the base images. The c
 in several phases, it is not necessary to specify all the repositories in the same execution. This command \ 
 allows users to create an image that can run Python, C++ and Go codes in the same container.
 
------------------------------
-Deploying IgnisHPC Containers
------------------------------
-
-Once all images are created, it is necessary to deploy the containers. IgnisHPC jobs are launched using the submitter module, \
-but to use a cluster it requires a resource and scheduler manager such as Nomad or Mesos. 
-
-Alternatively, IgnisHPC can also be launched as a slurm job in an HPC cluster, docker is replaced by singularity, so a different \
-submitter must be used.
-
-Next we show examples deploying the containers locally (no manager is needed), and using Nomad, Mesos and Slurm. 
-
-Docker (Only local)
-^^^^^^^^^^^^^^^^^^^^
-Submitter using an http endpoint::
-
- $ ignis-deploy submitter start --dfs <working-directory-path> --scheduler docker tcp://myhost:2375
-
-Submitter using a Unix-socket::
-
- $ ignis-deploy submitter start --dfs <working-directory-path> --scheduler docker /var/run/docker.sock \
-   --mount /var/run/docker.sock /var/run/docker.sock
-
-
-Nomad
-^^^^^
-
-Master node::
-
- $ ignis-deploy nomad start --password 1234 --volumes <working-directory-path\*>
-
-Worker nodes::
-
- $ ignis-deploy nomad start --password 1234 --join myhost1 --default-registry myhost1:5000
-
-Submitter::
-
- $ ignis-deploy submitter start --dfs <working-directory-path\*> \
-    --scheduler nomad http://myhostX:4646
-
-
-\* The working directory must be available on all nodes via NFS (Network File System) or a DFS (Distributed File System). (Only required for working with files)
-
-Mesos
-^^^^^
-
-Zookeeper is requiered by Mesos::
-
- $ ignis-deploy zookeeper start --password 1234
-
-Master node::
-
- $ ignis-deploy mesos start -q 1 --name master -zk  zk://master:2281 \
-    --service [marathon | singularity] --port-service 8888
-
-Worker nodes::
-
- $ ignis-deploy mesos start --name nodoX -zk  zk://master:2281 \
-    --port-service 8888 --default-registry master:5000
-
-Submitter::
-
- $ ignis-deploy submitter start --dfs <working-directory-path*> \
-    --scheduler [marathon | singularity] http://master:8888
-
-
-\* The working directory must be available on all nodes via NFS (Network File System) or a DFS (Distributed File System). (Only required for working with files)
-
-Slurm
-^^^^^
-
-The ``ignis-slurm`` submitter can be obtained from ``ignishpc/slurm-submitter`` with::
-
- $ docker run --rm -v $(pwd):/target ignishpc/slurm-submitter ignis-export /target
-
-This submitter will allow you to launch ignisHPC on a cluster as a non-root user and without docker.
-
-IgnisHPC Docker images can be converted to singulairty image files with::
-
- $ ignis-deploy images singularity [--host] ignishpc/full ignis_full.sif
-
-The basic syntax of ``ignis-slurm`` is the same as the later shown ``ignis-submit``, but a first parameter with job-time must be passed to be requested to slurm. The time can be specified in any format supported by slurm. 
-For example, a 10 minute job should start with::
-
-  $ ignis-slurm 00:10:00 ....
-
-In addition, help text can be displayed using::
-
-  $ ignis-slurm --help
-
 -----------------------
 Launching the first job
 -----------------------
 
-The first step to launch a job is to connect to the submiter container. The default password is ``ignis``, but we can change it inside the container or choose one when launching the submitter.::
 
- $  ssh root@myhost -p 2222
 
-The code we will use as an example is the classic Wordcount application, which can be seen below.
+To submit a job, you need to have code ready to run. In this example, we will use the classic WordCount application, shown below.
 
 .. code-block:: python
 
@@ -193,36 +101,13 @@ source code are resolved using this working directory, so ``/media/dfs/text.txt`
 
 Finally, we can execute our code using the submitter::
 
- $ ignis-submit ignishpc/python python3 driver.py
+ $ poetry run python main.py run driver.py
 
 or::
 
-  $ ignis-submit ignishpc/python ./driver.py
+  $ poetry run python main.py job run driver.py 
 
 
-When the execution has finished, we can see the result of the execution in ``wordcount.txt`` located in the working directory. If we want to check the execution logs, we must navigate to the scheduler web or use ``docker log`` in case of using docker directly.
-
-
-Launching without Container
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The ``ignis-submit`` can also be used outside the submiter container, for example where permanent containers are not allowed::
-
-$ docker run --rm -v $(pwd):/target ignishpc/submitter ignis-export /target
-
-This command will create a  ``ignis`` folder in the current directory with everything needed to run the submiter. The ``ignis-deploy`` command configures the submitter container, but when there is no container, we must set the configuration manually.
-The submitter needs a dfs and a scheduler, as ``ignis-deploy`` showed, these can be defined as environment variables or in ``ignis/etc/ignis.conf`` property file.
-
-.. code-block:: sh
-
-	# set current directory as job directory (ignis.dfs.id in ignis.conf)
-	export IGNIS_DFS_ID=$(pwd)
-	# set docker as scheduler (ignis.scheduler.type in ignis.conf)
-	export IGNIS_SCHEDULER_TYPE=docker
-	# set where docker is available (ignis.scheduler.url in ignis.conf)
-	export IGNIS_SCHEDULER_URL=/var/run/docker.sock
-
-
-The above example could be launched as follows::
-
-$ ./ignis/bin/ignis-submit ignishpc/python ./driver.py
+When the execution is finished, you can see the result in wordcount.txt, located in the working directory. \
+To check the execution logs, go to the job directory identified in the submission message, \
+for example ``driverpy-0sAdh`` and enter to the folder ``logs``.
