@@ -84,4 +84,3 @@ Next Steps
 -------------------
 
 To learn how to list or cancel jobs, or how to edit client configuration, refer to the :doc:`commands` section.
-For advanced usage, such as building custom images or deploying on clusters, see the :doc:`advanced_usage` guide.
