@@ -24,6 +24,7 @@ IgnisHPC
 
    started
    commands
+   advanced_usage
    api
    images
    properties
