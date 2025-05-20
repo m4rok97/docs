@@ -4,125 +4,146 @@ Docker Images
 .. image:: _static/img/docker-images.svg
    :align: center
    :alt: IgnisHPC images
-   
 
 ----------
 Background
 ----------
 
-IgnisHPC is fully containerized, these can be extended to create custom runtime environments and isolate incompatible
-modules. For those unfamiliar with containers, containers are running instances of an image, which is an immutable 
-environment that serves as the starting point when the container is started.
+IgnisHPC is fully containerized, and images live in each repository under a standard ``Dockerfiles/`` directory.  
+Each subfolder in ``Dockerfiles/`` ending in ``-builder`` or ``-lib`` drives how the client builds both builder and runtime images.  
+The client's ``ignishpc images build`` command:
 
+  1. Recursively scans every ``Dockerfiles/`` folder  
+  2. Detects subfolders whose names end in ``-builder`` or ``-lib``  
+  3. Builds each “builder” image (passing any ``ARG`` values from its Dockerfile)  
+  4. For each builder, generates one or more runtime images by copying its ``$IGNIS_HOME`` tree into a base template and running its install script  
+  5. Skips any folders labeled with ``LABEL ignis.build="optional"`` unless ``--all`` is specified  
 
-IgnisHPC images are organized according to a hierarchy, shown in the figure above, which allows us to
-extend and create new modules easily and simply. The images have an associated namespace that groups all the hierarchy
-of images, by default it is **ignishpc** but an user can create his own. Although all images have an important role to 
-play, in most cases, users should only familiarize themselves with the core images. A core container stores the IgnisHPC 
-implementation for a given language as well as its dependencies. Images without an associated IgnisHPC module are stored 
-in the Dockerfiles repository.
-
-
-Note that only images belonging to the IgnisHPC architecture are covered, images of external dependencies are optional 
-and are outside the scope of this document. 
-
+This hierarchy gives each folder name its image tag, and lets you extend IgnisHPC by simply adding new ``Dockerfiles/<module>-builder/`` or ``<module>-lib/`` folders.
 
 -------
 Details
 -------
 
+Inside each repository's ``Dockerfiles/`` directory, subfolders define separate build targets:
+
+- **Builder folders** (``<module>-builder/``)  
+  Each builder folder contains a Dockerfile that:
+
+  1. Uses a base builder template (via a ``FROM`` line, for example ``FROM common-Builder``).  
+  2. Compiles the module's source code.  
+  3. Places the build artifacts under ``$IGNIS_HOME`` in the image.  
+  4. Provides an install script named ``ignis-<module>-install.sh`` in ``$IGNIS_HOME/bin``.
+
+- **Library folders** (``<module>-lib/``, optional)  
+  Each library folder's Dockerfile:
+  
+  1. Starts FROM its corresponding builder image (e.g. ``FROM <module>-builder``).  
+  2. Builds any additional libraries or headers.  
+  3. Installs them into ``$IGNIS_HOME/lib`` and ``$IGNIS_HOME/include``.  
+  4. Includes its own ``ignis-<module>-install.sh`` in ``$IGNIS_HOME/bin``.
+
+- **Other folders**  
+  Any other subfolder under ``Dockerfiles/`` follows the same pattern: build from its designated builder, deposit output into ``$IGNIS_HOME``, and include an install script.
+
+Once all builder images are ready, the client creates final runtime images by:
+
+1. Copying the entire ``$IGNIS_HOME`` directory from each builder image into a fresh ``common`` template image.  
+2. Running the corresponding ``ignis-<module>-install.sh`` inside that runtime image to install the module.
+
+This structure ensures that adding a new ``<name>-builder/`` or ``<name>-lib/`` folder automatically integrates your custom core or library into IgnisHPC’s image hierarchy.  
+
+
+
 Base
 ^^^^
 
-Base, as its name indicates, is the base image of IgnisHPC. Base is created as an extension of the official ubuntu 
-image whose version is associated with the IgnisHPC version. This image only defines environment variables and creates 
-the IgnisHPC folder structure, which can be customized and modify the other images easily. 
+The **base** image extends an official Ubuntu release (matched to the IgnisHPC version).  
+It defines core environment variables and creates the empty ``$IGNIS_HOME`` hierarchy:
 
+- ``bin/``  
+- ``core/``  
+- ``lib/``  
+- ``include/``  
+- ``etc/``  
+- ``env.d/``
+
+All other images—builders and runtimes—start ``FROM base``.
 
 Builder
 ^^^^^^^
 
-Builder extends from base and installs the most common dependencies used in compilation environments such as the GNU Compiler
-Collection, the GNU Debugger and other libraries and development tools needed for software compilation. This image and its 
-derivatives are only used for software construction, they are never used for code execution.
+**Builder** images extend ``base`` to install build tools (GCC, GDB, etc.).  
+They are only used during the build stage and are never run for user code.
 
+**common-Builder**
+^^^^^^^^^^^^^^^^^^^^^^
 
-common-Builder
-^^^^^^^^^^^^^^
+Provides system-wide dependencies (e.g. MPI, Thrift) so that individual cores don’t each compile them.
 
-In this image the dependencies common to the whole system are stored and compiled. 
-MPI is compiled and modified from sources in this image and the thrift library is stored so that the cores do not have 
-to download it.
+**driver-Builder**
+^^^^^^^^^^^^^^^^^^^^^^
 
+Compiles the backend's driver code and installs it into ``$IGNIS_HOME`` along with its dependencies.
 
-driver-Builder
-^^^^^^^^^^^^^^
+**executor-Builder**
+^^^^^^^^^^^^^^^^^^^^^^
 
-This image is associated with the driver environment build, which compiles the source code and defines an installation 
-script to install it in the driver runtime environment. This image belongs to the Backend module and both are stored in
-the same repository.
-
-
-executor-Builder
-^^^^^^^^^^^^^^^^
-
-This image is associated with the executor environment build, there is no module associated to the executor, so only the
-installation script is created to install it in the executor runtime environment and compiles any dependencies if 
-necessary.
-
+Compiles executor-side components and prepares an install script in ``$IGNIS_HOME/bin``.
 
 common
 ^^^^^^
 
-Common execution environment for the execution of all IgnisHPC modules, this image extends from base to inherit the
-environment configuration. The image build depends on driver-builder and exectutor-builder, from which it obtains 
-the dependencies and installation scripts for a driver and executor environment. Neither the dependencies nor the 
-runtime environments are installed, they are just stored.
+The **common** runtime template extends ``base`` and carries:
+
+- Build outputs from ``driver-Builder`` and ``executor-Builder`` (but does not install them until the install script runs)  
+- Empty ``$IGNIS_HOME`` subfolders ready to receive core and library artifacts
 
 
 core-builder
 ^^^^^^^^^^^^
 
-The programming languages supported by IgnisHPC are known as cores, which consist of a driver code and an executor code.
-Each core has a builder image used for the compilation of sources and its dependencies and for the creation of an
-installation script. The name of the image must be the name of the core with the suffix ``-builder`` and must be 
-stored in the same repository as the core source code.
+Each language **core** (e.g. Python, C++, Go) provides its own ``<core>-builder/`` folder:
+
+- Builds core sources  
+- Generates ``ignis-<core>-install.sh`` in ``$IGNIS_HOME/bin``  
+- The folder name (e.g. ``python-builder``) becomes the image tag
 
 
 core images
 ^^^^^^^^^^^
 
-Core images are the execution environments used by users to run their codes in IgnisHPC. The core images are three and
-are generated automatically from their corresponding builder extending the common image.
+For each core-builder, three runtime images are automatically generated:
 
- 1. It has the same name as the core with suffix ``-driver``, it has the driver environment installed.
- 2. It has the same name as the core with suffix ``-executor``, it has the  executor environment installed.
- 3. It has the same name as the core, it has the driver and executor environment installed.
+1. ``<core>-driver``   - installs only the driver components  
+2. ``<core>-executor`` - installs only the executor components  
+3. ``<core>``           - installs both driver and executor components
 
+All are built ``FROM`` the ``common`` template by running the corresponding install scripts.
 
-The core images have the core and its dependencies installed but can only be used as a driver or executor if its 
-environment is installed. 
- 
- 
 core helper images
 ^^^^^^^^^^^^^^^^^^
 
-In some cases it is possible that a core may need an additional image. For example, compiled languages may define 
-a ``-compiler`` image to facilitate the compilation process. These images are stored in the source code repository  
-and should be prefixed with the core name to identify them.
+Any ``<core>-lib/`` or other helper folder under ``Dockerfiles/`` produces:
+
+- A library runtime image that installs into ``$IGNIS_HOME/lib`` and ``$IGNIS_HOME/include``
 
 
 full
 ^^^^
 
-A full runtime Image, like the cores, is generated automatically. This image has the enviroment driver, 
-the enviroment executor and all available cores installed. This is the default image for the executors 
-when no image is selected.
+A ``full`` runtime image includes both driver and executor for all cores:
+
+- Built automatically after individual core images  
+- Tagged ``ignishpc/full`` by default
 
 
 submitter
 ^^^^^^^^^
 
-This image is associated with the IgnisHPC job launch, with are launched using the ``ignis-submit``
-script. The submiter module is implemented together with the backend module, so both are compiled 
-in the ``driver-builder`` and the image is stored in the backend repository.
+The ``submitter`` image bundles the job-submission CLI (``ignishpc run``) and its dependencies:
+
+- Compiled in the ``driver-Builder`` stage  
+- Stored in the backend repository  
+
+It is used under the hood by ``ignishpc run`` when Docker is the scheduler.
