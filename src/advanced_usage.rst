@@ -1,48 +1,83 @@
 Advanced Usage
 ==============
 
-This section dives into power-user workflows for building and managing your own IgnisHPC images, running them via a local registry, and converting to Singularity.
-
-------------------------
-1. Local Docker Registry
-------------------------
-
-IgnisHPC doesn't yet provide a built-in registry subcommand. Instead, you can spin up a local Docker registry with the Docker CLI:
-
-.. code-block:: bash
-
-   # Pull the official registry image
-   docker pull registry:2
-
-   # Run a registry container on localhost:5000
-   docker run -d \
-     --name ignis-registry \
-     --restart=always \
-     -p 5000:5000 \
-     registry:2
-
-This starts a registry listening on **localhost:5000**.
-
-If you encounter an “insecure registry” warning, add this to ``/etc/docker/daemon.json`` and restart Docker:
-
-.. code-block:: json
-
-   {
-     "insecure-registries": ["localhost:5000"]
-   }
-
-Verify the registry is running:
-
-.. code-block:: bash
-
-   docker ps --filter name=ignis-registry
-   docker pull hello-world
-
-Your local registry is now ready for IgnisHPC image pushes and pulls.
+This section describes advanced workflows for working with IgnisHPC images, covering Docker vs. Singularity, scheduler options, and registry considerations.
 
 -------------------------
-2. Building Custom Images
+1. Docker vs. Singularity
 -------------------------
+
+IgnisHPC supports both Docker and Singularity container formats. Although both provide isolated environments, there are important differences:
+
+- **Docker**
+
+  - Widely used for local development and single-node workloads.  
+  - Relies on a running Docker daemon with root privileges (unless configured otherwise).  
+  - Ideal for building and testing images before deploying to production.  
+
+- **Singularity**  
+
+  - Designed for HPC environments where users typically do not have root access.  
+  - Runs containers as the calling user by default, integrating seamlessly with shared filesystems.  
+  - Supports converting Docker images into a single SIF (Singularity Image Format) file.  
+  - Preferred for Slurm-based multi-node clusters where Docker may not be permitted.
+
+Use Docker for local, single-node experimentation and image building; use Singularity when you need user-space execution on HPC clusters or want portable, immutable SIF files.
+
+------------------------
+2. Scheduler Options
+------------------------
+
+In the current IgnisHPC release, three scheduler backends are supported:
+
+- **Docker Scheduler**
+
+  - Runs jobs in Docker containers on the current node.  
+  - Suitable for development or single-node deployments.  
+  - Job submission command:
+
+    ``ignishpc run driver.py --img <docker-image>``
+
+- **Singularity Scheduler**
+
+  - Runs jobs inside Singularity containers on the local node.  
+  - Used when Docker is unavailable or not permitted (e.g. shared HPC login nodes).
+  - It's the default scheduler if no other is specified.
+  - To select Singularity as the scheduler, pass the scheduler name as a job property:
+
+    ``-p "ignis.scheduler.name=singularity"``  
+  
+  - Example job submission (Singularity):
+
+    ``ignishpc run driver.py --img <singularity.sif> -p "ignis.scheduler.name=singularity``
+
+- **Slurm Scheduler**
+
+  - Submits jobs via Slurm to a multi-node cluster.  
+  - To select Slurm as the scheduler, pass the scheduler name as a job property:
+
+    ``-p "ignis.scheduler.name=slurm"``
+
+  - Example job submission (Slurm):
+
+    ``ignishpc run driver.py --image ./tmp.sif -p "ignis.scheduler.name=slurm"`` 
+
+  - Under the hood, IgnisHPC will use Slurm to allocate resources and run the job across multiple nodes.
+
+
+**Single-node vs. Multi-node**
+
+- Docker and Singularity backends are limited to a single host: all executor containers run on the same machine where you issue ``ignishpc run``.  
+- Slurm enables multi-node parallelism: IgnisHPC distributes tasks across multiple compute nodes managed by the cluster's Slurm controller.
+
+Choose the scheduler that matches your environment:
+
+- For local testing, Docker or Singularity is fastest to set up.
+- For HPC-scale jobs, prefer Slurm to leverage multiple nodes and shared filesystems.
+
+-----------------------------
+3. Building Custom Images
+-----------------------------
 
 You can build IgnisHPC images from any combination of core repositories. Example:
 
@@ -117,31 +152,7 @@ Or, with your Singularity SIF:
      driver.py
 
 ------------------------
-5. Singularity Workflow
-------------------------
-
-If you prefer Singularity end-to-end:
-
-.. code-block:: bash
-
-   # Build Docker image for feature branch
-   ignishpc images build \
-     -s "https://github.com/ignishpc/core-base.git" \
-     -s "https://github.com/ignishpc/core-python.git" \
-     --registry localhost:5000 \
-     --tag singularity-test
-
-   # Pull image locally and convert to SIF
-   ignishpc images pull \
-     --local \
-     --singularity tmp.sif \
-     ignishpc/core-base:singularity-test
-
-   # Run with SIF
-   ignishpc run --img ./tmp.sif ls
-
-------------------------
-6. Cleanup & Maintenance
+5. Cleanup & Maintenance
 ------------------------
 
 Remove outdated or untagged images:
@@ -159,3 +170,40 @@ If you need a fresh registry:
 
    ignishpc services registry destroy
    ignishpc deploy registry start --default
+
+------------------------
+6. Local Docker Registry
+------------------------
+
+IgnisHPC doesn't yet provide a built-in registry subcommand. Instead, you can spin up a local Docker registry with the Docker CLI:
+
+.. code-block:: bash
+
+   # Pull the official registry image
+   docker pull registry:2
+
+   # Run a registry container on localhost:5000
+   docker run -d \
+     --name ignis-registry \
+     --restart=always \
+     -p 5000:5000 \
+     registry:2
+
+This starts a registry listening on **localhost:5000**.
+
+If you encounter an “insecure registry” warning, add this to ``/etc/docker/daemon.json`` and restart Docker:
+
+.. code-block:: json
+
+   {
+     "insecure-registries": ["localhost:5000"]
+   }
+
+Verify the registry is running:
+
+.. code-block:: bash
+
+   docker ps --filter name=ignis-registry
+   docker pull hello-world
+
+Your local registry is now ready for IgnisHPC image pushes and pulls.
